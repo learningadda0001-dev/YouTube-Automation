@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   sample:
@@ -47,3 +47,29 @@ jobs:
             episodes/sample/images/*.png
           if-no-files-found: error
           retention-days: 14
+
+      # Artifacts are served from Azure storage, which some clients cannot
+      # reach. Pushing the same files to an orphan branch makes them
+      # fetchable over plain git from anywhere, and keeps them out of main's
+      # history — the branch is replaced wholesale on every run.
+      - name: Publish the sample to the sample-output branch
+        if: success()
+        run: |
+          SIZE=$(du -m episodes/sample/final.mp4 | cut -f1)
+          if [ "$SIZE" -gt 60 ]; then
+            echo "final.mp4 is ${SIZE}MB — too large for a git branch, skipping"
+            exit 0
+          fi
+          mkdir -p /tmp/out
+          cp episodes/sample/final.mp4 episodes/sample/thumbnail.jpg /tmp/out/
+          git config user.name  "youtube-automation"
+          git config user.email "actions@github.com"
+          git checkout --orphan sample-output
+          git rm -rf --cached . >/dev/null 2>&1 || true
+          find . -maxdepth 1 ! -name . ! -name .git -exec rm -rf {} +
+          cp /tmp/out/* .
+          echo "Sample render from run ${GITHUB_RUN_ID}. Replaced on every run." > README.md
+          git add -A
+          git commit -q -m "sample render from run ${GITHUB_RUN_ID}"
+          git push -f origin sample-output
+          echo "pushed ${SIZE}MB to sample-output"
