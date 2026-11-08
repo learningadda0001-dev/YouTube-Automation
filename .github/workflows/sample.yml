@@ -1,0 +1,49 @@
+name: Sample render (no secrets needed)
+
+# Builds a ~35 second sample using only the keyless providers — Pollinations
+# for images, edge-tts for the Kannada voice. Run this before setting up any
+# API keys, to see what the finished product actually looks and sounds like.
+# Download the result from the run's Artifacts section.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sample:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ffmpeg and Kannada fonts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-core fonts-noto-unhinted
+          fc-list | grep -qi kannada || { echo "No Kannada font installed"; exit 1; }
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build the sample
+        run: python src/make_sample.py
+
+      - name: Upload the sample
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sample-render
+          path: |
+            episodes/sample/final.mp4
+            episodes/sample/thumbnail.jpg
+            episodes/sample/images/*.png
+          if-no-files-found: error
+          retention-days: 14
