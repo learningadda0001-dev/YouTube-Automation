@@ -24,14 +24,20 @@ Pollinations. Both are free. Change the split in `config/style.yaml` under
 `visual.providers`.
 
 **Compute does not fit the private-repo free tier.** About 95 minutes a run is
-~2,900 minutes a month against 2,000 free. Options, cheapest first:
+~2,900 minutes a month against 2,000 free.
 
-1. **Make the repo public** — Actions minutes are unlimited and free for public
-   repos. Secrets stay secret; only the code is visible. This is the
-   recommended fix and costs nothing.
-2. Pay for the overage, roughly $7 a month.
-3. Run a self-hosted runner on your own PC — free, but the PC must be on.
-4. Drop `target_minutes` to about 13, which brings a month under 2,000.
+**Decision taken: this repo runs public.** Actions minutes are unlimited and
+free on public repos, so the whole stack stays at zero. Secrets live in
+Actions secrets and are not exposed by making the code public — but never
+commit a real key to a file here, and never remove `.env` from `.gitignore`.
+
+> If the repo is still private, set it public under
+> **Settings → Danger Zone → Change repository visibility**, or the daily job
+> will stop partway through each month once the 2,000 minutes are spent.
+
+Rejected alternatives: paying ~$7/month for the overage; a self-hosted runner
+on a PC that would have to stay on; or cutting episodes to ~13 minutes, which
+is below the 15-minute floor.
 
 ## How it works
 
