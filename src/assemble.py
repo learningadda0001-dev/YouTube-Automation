@@ -54,6 +54,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--slug", required=True)
     ap.add_argument("--keep-temp", action="store_true")
+    ap.add_argument("--preview", action="store_true",
+                    help="also write a small 720p preview.mp4 for review")
     args = ap.parse_args()
 
     if not shutil.which("ffmpeg"):
@@ -135,7 +137,10 @@ def main():
     ass = (ep / "captions.ass").as_posix().replace(":", "\\:")
     # Grain then vignette then captions: the captions must stay clean, so they
     # are drawn after the film treatment, not under it.
-    vfilter = f"noise=alls=5:allf=t,vignette=PI/5,subtitles='{ass}'"
+    grain = int(vis.get("grain", 2))
+    treatment = f"noise=alls={grain}:allf=t," if grain > 0 else ""
+    vfilter = f"{treatment}vignette=PI/5,subtitles='{ass}'"
+    crf = str(vis.get("crf", 21))
     final = ep / "final.mp4"
     bed = next((p for p in sorted((ep.parent.parent / "assets" / "music").glob("*.mp3"))), None)
 
@@ -156,7 +161,10 @@ def main():
             "-vf", vfilter,
             "-af", f"loudnorm=I={aud['target_lufs']}:TP=-1.5:LRA=11",
         ]
-    cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "19",
+    cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", crf,
+            # A hard ceiling: random grain can otherwise push a long episode
+            # into the gigabytes, which is slow to upload and buys nothing.
+            "-maxrate", "9M", "-bufsize", "18M",
             "-pix_fmt", "yuv420p", "-movflags", "+faststart",
             "-c:a", "aac", "-b:a", "256k", "-ar", "48000", "-ac", "2", str(final)]
     run(cmd)
@@ -165,7 +173,19 @@ def main():
         shutil.rmtree(tmp, ignore_errors=True)
 
     total = probe_duration(final)
-    log("assemble", f"{final}  {int(total // 60)}:{int(total % 60):02d}")
+    size_mb = final.stat().st_size / 1_000_000
+    log("assemble", f"{final}  {int(total // 60)}:{int(total % 60):02d}  "
+                    f"{size_mb:.0f}MB")
+
+    if args.preview:
+        prev = ep / "preview.mp4"
+        run(["ffmpeg", "-y", "-i", str(final),
+             "-vf", "scale=1280:720", "-c:v", "libx264", "-preset", "veryfast",
+             "-crf", "30", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+             "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
+             str(prev)])
+        log("assemble", f"{prev}  {prev.stat().st_size / 1_000_000:.0f}MB "
+                        f"(720p review copy)")
 
 
 if __name__ == "__main__":

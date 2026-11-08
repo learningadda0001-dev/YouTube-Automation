@@ -43,6 +43,7 @@ jobs:
           name: sample-render
           path: |
             episodes/sample/final.mp4
+            episodes/sample/preview.mp4
             episodes/sample/thumbnail.jpg
             episodes/sample/images/*.png
           if-no-files-found: error
@@ -55,13 +56,17 @@ jobs:
       - name: Publish the sample to the sample-output branch
         if: success()
         run: |
-          SIZE=$(du -m episodes/sample/final.mp4 | cut -f1)
+          # The 720p preview, not the full-size master — a git branch is no
+          # place for a gigabyte, and the preview is enough to judge voice,
+          # captions and pacing.
+          SIZE=$(du -m episodes/sample/preview.mp4 | cut -f1)
+          echo "preview.mp4 is ${SIZE}MB"
           if [ "$SIZE" -gt 60 ]; then
-            echo "final.mp4 is ${SIZE}MB — too large for a git branch, skipping"
+            echo "still too large for a git branch, skipping"
             exit 0
           fi
           mkdir -p /tmp/out
-          cp episodes/sample/final.mp4 episodes/sample/thumbnail.jpg /tmp/out/
+          cp episodes/sample/preview.mp4 episodes/sample/thumbnail.jpg /tmp/out/
           git config user.name  "youtube-automation"
           git config user.email "actions@github.com"
           git checkout --orphan sample-output

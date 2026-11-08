@@ -142,7 +142,7 @@ def main() -> None:
         placeholders(ep, [s for s in scenes if s["is_image_leader"]], w, h)
     call("make_captions.py", "--slug", SLUG)
     call("make_thumbnail.py", "--slug", SLUG)
-    call("assemble.py", "--slug", SLUG)
+    call("assemble.py", "--slug", SLUG, "--preview")
     log("sample", f"done: {ep / 'final.mp4'}")
 
 
