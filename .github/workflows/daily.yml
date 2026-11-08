@@ -32,7 +32,9 @@ permissions:
 jobs:
   episode:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # A 20-minute episode measures at roughly 75 min of rendering plus ~20 min
+    # of image generation. 330 leaves room without hitting the 360 ceiling.
+    timeout-minutes: 330
 
     steps:
       - uses: actions/checkout@v4

@@ -73,6 +73,7 @@ def main():
     if active("voice"):
         call("gen_voice.py", "--slug", slug)
     if active("images"):
+        # After parse, so meta.json exists and the thumbnail frame can be made.
         call("gen_images.py", "--slug", slug)
     if active("captions"):
         call("make_captions.py", "--slug", slug)

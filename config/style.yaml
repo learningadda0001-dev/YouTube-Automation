@@ -3,8 +3,11 @@
 
 channel:
   language: kn            # narration language
-  target_minutes: 9.5
-  scenes: 50              # one generated image per scene
+  target_minutes: 20      # acceptable range is 15–25
+  min_minutes: 15
+  max_minutes: 25
+  scenes: 100             # one generated image per scene, ~12s each
+  acts: 8                 # script is generated act by act, not in one call
   chars_per_second: 13.0  # Kannada narration rate, used to estimate runtime
 
 visual:
@@ -27,6 +30,13 @@ visual:
     zoom_per_second: 0.012
     split_after: 9.0
     moves: [push_in, pull_out, pan_left, pan_right]
+  # 100 images exceeds Cloudflare's ~57/day free allowance, so the run is
+  # split across two free providers. Cloudflare first (better quality),
+  # Pollinations for the remainder.
+  providers:
+    primary: cloudflare
+    primary_budget: 50
+    secondary: pollinations
 
 voice:
   provider: edge          # edge (free) | elevenlabs | google

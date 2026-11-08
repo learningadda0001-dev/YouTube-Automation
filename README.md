@@ -1,26 +1,37 @@
 # YouTube automation — daily Kannada history episodes
 
-One 9–10 minute narrated Kannada video per day, written, voiced, illustrated,
-assembled and uploaded without anyone at a keyboard. Runs on GitHub Actions,
-so your PC does not need to be on.
+One 15–25 minute narrated Kannada video per day (target 20), written, voiced,
+illustrated, assembled and uploaded without anyone at a keyboard. Runs on
+GitHub Actions, so your PC does not need to be on.
 
 ## What it costs
 
-Nothing, on the default stack.
+Nothing for the content. One caveat on compute, below.
 
 | Stage | Service | Free allowance | Used per episode |
 |---|---|---|---|
-| Script | Gemini API | free tier | 1 long call |
-| Images | Cloudflare Workers AI, FLUX-1-schnell | 10,000 neurons/day ≈ 57 images | ~50 |
-| Voice | edge-tts (Microsoft neural Kannada) | unlimited, no key | ~7,000 chars |
+| Script | Gemini API | free tier | 1 outline + 8 act calls |
+| Images (first 50) | Cloudflare Workers AI, FLUX-1-schnell | 10,000 neurons/day ≈ 57 images | 50 |
+| Images (rest) | Pollinations, keyless | no published cap | ~50 |
+| Voice | edge-tts (Microsoft neural Kannada) | unlimited, no key | ~15,600 chars |
 | Motion, captions, mixing | ffmpeg on the runner | — | — |
 | Upload | YouTube Data API v3 | 10,000 quota units/day | 1,600 |
-| Compute | GitHub Actions | 2,000 min/month private | ~25 min |
+| Compute | GitHub Actions | 2,000 min/month **private** | ~95 min |
 
-The image budget is the tight one: 50 of ~57 images a day. Nothing else may
-share that Cloudflare account or an episode will fail halfway. If it does,
-re-run with `--from images` — finished images are reused, so only the missing
-ones are generated.
+**A 20-minute episode needs ~100 images, and Cloudflare's free tier is ~57 a
+day.** So the run is split: the first 50 come from Cloudflare, the rest from
+Pollinations. Both are free. Change the split in `config/style.yaml` under
+`visual.providers`.
+
+**Compute does not fit the private-repo free tier.** About 95 minutes a run is
+~2,900 minutes a month against 2,000 free. Options, cheapest first:
+
+1. **Make the repo public** — Actions minutes are unlimited and free for public
+   repos. Secrets stay secret; only the code is visible. This is the
+   recommended fix and costs nothing.
+2. Pay for the overage, roughly $7 a month.
+3. Run a self-hosted runner on your own PC — free, but the PC must be on.
+4. Drop `target_minutes` to about 13, which brings a month under 2,000.
 
 ## How it works
 
@@ -41,6 +52,14 @@ narration line, with a slow camera move applied in ffmpeg. Scenes longer than
 nine seconds get two different moves on the same still, so the framing changes
 every few seconds. Grain and a vignette go on top — a perfectly clean AI still
 looks synthetic, a slightly noisy one reads as film.
+
+The script is **not** written in one call. At 20 minutes that is ~15,600
+Kannada characters across 100 scenes, and a single call drifts, loses count
+and thins out badly after the first third. Instead `write_script.py` makes one
+outline call that fixes the acts and the title, then one call per act, each
+given the previous act's closing line so the narration joins up. Scene
+numbering is forced sequential afterwards, because models miscount over
+long runs.
 
 ## Setup
 
@@ -131,3 +150,8 @@ episode.
   stack, so a recurring person will not look identical across shots. Scripts
   should favour places, objects and crowds over one tracked individual.
 - **Daily burns topics fast.** See the note above about the backlog.
+- **20 minutes is a lot to fill honestly.** Some topics in the backlog cannot
+  carry it without padding. The outline prompt is told to widen into context
+  rather than repeat itself, but watch the first few: a thin 20-minute episode
+  retains worse than a dense 10-minute one. If a topic will not stretch, drop
+  `target_minutes` for that run rather than letting it waffle.

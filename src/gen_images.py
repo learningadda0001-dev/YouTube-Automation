@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import json
 import time
 from pathlib import Path
 
@@ -58,53 +59,93 @@ def pollinations(prompt: str, out: Path, width: int, height: int) -> None:
 PROVIDERS = {"cloudflare": cloudflare, "pollinations": pollinations}
 
 
+def generate(prompt: str, out: Path, w: int, h: int, provider: str,
+             secondary: str, retries: int) -> str:
+    """Try `provider`, fall back to `secondary`. Returns what actually made it."""
+    last_error = None
+    for attempt in range(retries):
+        try:
+            PROVIDERS[provider](prompt, out, w, h)
+            return provider
+        except Exception as exc:                          # noqa: BLE001
+            last_error = exc
+            time.sleep(2 ** attempt * 3)
+
+    if secondary == "none" or secondary == provider:
+        raise SystemExit(f"{out.stem} failed: {last_error}")
+    log("images", f"{out.stem}: {provider} failed ({last_error}); "
+                  f"falling back to {secondary}")
+    PROVIDERS[secondary](prompt, out, w, h)
+    return secondary
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--slug", required=True)
-    ap.add_argument("--provider", choices=list(PROVIDERS), default="cloudflare")
-    ap.add_argument("--fallback", choices=list(PROVIDERS) + ["none"],
-                    default="pollinations")
+    ap.add_argument("--provider", choices=list(PROVIDERS),
+                    help="override the primary from style.yaml")
+    ap.add_argument("--budget", type=int,
+                    help="override how many images the primary provider makes")
     ap.add_argument("--retries", type=int, default=3)
     args = ap.parse_args()
 
     c = cfg()
     w, h = c["visual"]["width"], c["visual"]["height"]
+    prov = c["visual"].get("providers", {})
+    primary = args.provider or prov.get("primary", "cloudflare")
+    secondary = prov.get("secondary", "pollinations")
+    budget = args.budget if args.budget is not None else prov.get(
+        "primary_budget", 50)
+
     ep = EPISODES / args.slug
     images = ep / "images"
     images.mkdir(exist_ok=True)
     scenes = load_scenes(ep)
 
-    made = skipped = fell_back = 0
+    # A 20-minute episode needs ~100 images; Cloudflare's free tier is ~57 a
+    # day. The first `budget` go to the primary, the rest to the secondary.
+    if len(scenes) > budget:
+        log("images", f"{len(scenes)} images needed: first {budget} from "
+                      f"{primary}, remaining {len(scenes) - budget} from "
+                      f"{secondary}")
+
+    counts: dict[str, int] = {}
+    skipped = 0
+    spent = 0
     for s in scenes:
         out = images / f"{s['slug']}.png"
         if out.exists() and out.stat().st_size > 10_000:
             skipped += 1
             continue
 
-        prompt = s["image_prompt"]
-        last_error = None
-        for attempt in range(args.retries):
+        which = primary if spent < budget else secondary
+        used = generate(s["image_prompt"], out, w, h, which, secondary,
+                        args.retries)
+        counts[used] = counts.get(used, 0) + 1
+        if used == primary:
+            spent += 1
+
+        done = sum(counts.values())
+        if done % 20 == 0:
+            log("images", f"{done} generated ...")
+
+    # The thumbnail gets its own frame when the outline described one.
+    meta_path = ep / "meta.json"
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        thumb_prompt = meta.get("thumbnail_image", "").strip()
+        thumb = images / "thumbnail_src.png"
+        if thumb_prompt and not thumb.exists():
+            suffix = " ".join(c["visual"]["style_suffix"].split())
             try:
-                PROVIDERS[args.provider](prompt, out, w, h)
-                made += 1
-                last_error = None
-                break
-            except Exception as exc:                      # noqa: BLE001
-                last_error = exc
-                time.sleep(2 ** attempt * 3)
+                generate(f"{thumb_prompt}, {suffix}", thumb, w, h,
+                         secondary, secondary, args.retries)
+                log("images", "thumbnail frame generated")
+            except SystemExit:
+                log("images", "thumbnail frame failed — will reuse a scene")
 
-        if last_error is not None:
-            if args.fallback == "none":
-                raise SystemExit(f"{s['slug']} failed: {last_error}")
-            log("images", f"{s['slug']}: {args.provider} failed "
-                          f"({last_error}); trying {args.fallback}")
-            PROVIDERS[args.fallback](prompt, out, w, h)
-            fell_back += 1
-
-        if (made + fell_back) % 10 == 0:
-            log("images", f"{made + fell_back} generated ...")
-
-    log("images", f"{made} generated, {fell_back} via fallback, {skipped} reused")
+    summary = ", ".join(f"{n} via {p}" for p, n in counts.items()) or "none"
+    log("images", f"{summary}; {skipped} reused")
 
     missing = [s["slug"] for s in scenes
                if not (images / f"{s['slug']}.png").exists()]
