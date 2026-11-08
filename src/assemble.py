@@ -73,10 +73,10 @@ def main():
 
     segments = []
     for i, s in enumerate(scenes):
-        img = ep / "images" / f"{s['slug']}.png"
+        img = ep / "images" / f"{s.get('image', s['slug'])}.png"
         voice = ep / "audio" / f"{s['slug']}.mp3"
         if not img.exists():
-            raise SystemExit(f"missing image for {s['slug']}")
+            raise SystemExit(f"missing image {img.name} for {s['slug']}")
         if not voice.exists():
             raise SystemExit(f"missing audio for {s['slug']}")
 

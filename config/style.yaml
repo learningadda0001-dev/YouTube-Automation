@@ -6,9 +6,13 @@ channel:
   target_minutes: 20      # acceptable range is 15–25
   min_minutes: 15
   max_minutes: 25
-  scenes: 100             # one generated image per scene, ~12s each
+  scenes: 100             # ~12s each
   acts: 8                 # script is generated act by act, not in one call
-  chars_per_second: 13.0  # Kannada narration rate, used to estimate runtime
+  # MEASURED, not guessed: 475 characters of Kannada read by kn-IN-GaganNeural
+  # at rate -8% came out at 46.0s on a real render (8 Nov 2026). The first
+  # estimate of 13.0 would have produced a 25-minute episode from a 20-minute
+  # budget. Re-measure if you change the voice or the rate.
+  chars_per_second: 10.3
 
 visual:
   width: 1920
@@ -30,13 +34,18 @@ visual:
     zoom_per_second: 0.012
     split_after: 9.0
     moves: [push_in, pull_out, pan_left, pan_right]
-  # 100 images exceeds Cloudflare's ~57/day free allowance, so the run is
-  # split across two free providers. Cloudflare first (better quality),
-  # Pollinations for the remainder.
+  # Consecutive scenes share one image, each getting a different camera move,
+  # so the framing still changes every scene. This is what keeps a 100-scene
+  # episode inside Cloudflare's ~57 free images a day. Set to 1 if you add a
+  # second image provider and want a fresh frame per scene.
+  scenes_per_image: 2
+  # Pollinations started returning 402 Payment Required on 8 Nov 2026, so it
+  # is no longer a free fallback. huggingface needs a free HF_TOKEN; without
+  # one, keep scenes_per_image at 2 and everything fits in Cloudflare alone.
   providers:
     primary: cloudflare
-    primary_budget: 50
-    secondary: pollinations
+    primary_budget: 55
+    secondary: none
 
 voice:
   provider: edge          # edge (free) | elevenlabs | google

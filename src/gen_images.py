@@ -46,7 +46,25 @@ def cloudflare(prompt: str, out: Path, width: int, height: int) -> None:
     out.write_bytes(base64.b64decode(b64))
 
 
+def huggingface(prompt: str, out: Path, width: int, height: int) -> None:
+    """Needs a free token from huggingface.co/settings/tokens as HF_TOKEN."""
+    model = "black-forest-labs/FLUX.1-schnell"
+    r = requests.post(
+        f"https://api-inference.huggingface.co/models/{model}",
+        headers={"Authorization": f"Bearer {env('HF_TOKEN')}"},
+        json={"inputs": prompt[:1500],
+              "parameters": {"width": width, "height": height}},
+        timeout=300,
+    )
+    if r.status_code == 503:
+        raise RuntimeError("model is loading")
+    r.raise_for_status()
+    out.write_bytes(r.content)
+
+
 def pollinations(prompt: str, out: Path, width: int, height: int) -> None:
+    """Keyless, but started returning 402 Payment Required on 8 Nov 2026.
+    Kept because it may come back; do not rely on it."""
     from urllib.parse import quote
 
     url = (f"https://image.pollinations.ai/prompt/{quote(prompt[:1500])}"
@@ -56,7 +74,8 @@ def pollinations(prompt: str, out: Path, width: int, height: int) -> None:
     out.write_bytes(r.content)
 
 
-PROVIDERS = {"cloudflare": cloudflare, "pollinations": pollinations}
+PROVIDERS = {"cloudflare": cloudflare, "huggingface": huggingface,
+             "pollinations": pollinations}
 
 
 def generate(prompt: str, out: Path, w: int, h: int, provider: str,
@@ -102,18 +121,27 @@ def main():
     images.mkdir(exist_ok=True)
     scenes = load_scenes(ep)
 
-    # A 20-minute episode needs ~100 images; Cloudflare's free tier is ~57 a
-    # day. The first `budget` go to the primary, the rest to the secondary.
-    if len(scenes) > budget:
-        log("images", f"{len(scenes)} images needed: first {budget} from "
-                      f"{primary}, remaining {len(scenes) - budget} from "
-                      f"{secondary}")
+    # Scenes share images in groups (visual.scenes_per_image), so only the
+    # group leaders are generated. That is what keeps a 100-scene episode
+    # inside Cloudflare's ~57 free images a day.
+    leaders = [s for s in scenes if s.get("is_image_leader", True)]
+    log("images", f"{len(scenes)} scenes -> {len(leaders)} images")
+    if len(leaders) > budget:
+        if secondary == "none":
+            raise SystemExit(
+                f"{len(leaders)} images needed but the {primary} budget is "
+                f"{budget} and no secondary provider is set. Raise "
+                f"visual.scenes_per_image, or add a second provider."
+            )
+        log("images", f"first {budget} from {primary}, remaining "
+                      f"{len(leaders) - budget} from {secondary}")
 
     counts: dict[str, int] = {}
     skipped = 0
     spent = 0
-    for s in scenes:
-        out = images / f"{s['slug']}.png"
+    for s in leaders:
+        out = images / f"{s['image']}.png" if "image" in s else \
+            images / f"{s['slug']}.png"
         if out.exists() and out.stat().st_size > 10_000:
             skipped += 1
             continue
@@ -139,7 +167,7 @@ def main():
             suffix = " ".join(c["visual"]["style_suffix"].split())
             try:
                 generate(f"{thumb_prompt}, {suffix}", thumb, w, h,
-                         secondary, secondary, args.retries)
+                         primary, secondary, args.retries)
                 log("images", "thumbnail frame generated")
             except SystemExit:
                 log("images", "thumbnail frame failed — will reuse a scene")
@@ -147,8 +175,8 @@ def main():
     summary = ", ".join(f"{n} via {p}" for p, n in counts.items()) or "none"
     log("images", f"{summary}; {skipped} reused")
 
-    missing = [s["slug"] for s in scenes
-               if not (images / f"{s['slug']}.png").exists()]
+    missing = sorted({s.get("image", s["slug"]) for s in scenes
+                      if not (images / f"{s.get('image', s['slug'])}.png").exists()})
     if missing:
         raise SystemExit("missing images: " + ", ".join(missing))
 

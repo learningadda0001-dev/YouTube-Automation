@@ -92,8 +92,15 @@ def main():
     validate(scenes, c["channel"]["scenes"])
 
     suffix = " ".join(c["visual"]["style_suffix"].split())
+    group = max(1, int(c["visual"].get("scenes_per_image", 1)))
     for s in scenes:
         s["slug"] = f"scene_{s['id']:02d}"
+        # Scenes share an image in groups, so a 100-scene episode needs only
+        # 100/group images. The leader's visual prompt is the one generated;
+        # each scene in the group still gets its own camera move.
+        leader = ((s["id"] - 1) // group) * group + 1
+        s["image"] = f"scene_{leader:02d}"
+        s["is_image_leader"] = (s["id"] == leader)
         s["image_prompt"] = f"{s['visual']}, {suffix}"
 
     (ep / "scenes.json").write_text(

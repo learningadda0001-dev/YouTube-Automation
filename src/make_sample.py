@@ -1,14 +1,16 @@
-"""Build a short sample episode using only the keyless providers.
+"""Build a short sample episode to judge quality before full setup.
 
-Needs no secrets at all: Pollinations for the images, edge-tts for the voice.
-Run it to see what the finished product actually looks and sounds like before
-setting up any API keys.
+The voice is free and keyless (edge-tts). Images need one credential — either
+CF_ACCOUNT_ID + CF_API_TOKEN, or a free HF_TOKEN. With neither, the sample
+still renders with plain placeholder frames so you can at least hear the
+narration and check the caption timing.
 
     python src/make_sample.py
 """
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -68,19 +70,52 @@ def call(script: str, *args) -> None:
         raise SystemExit(f"stage failed: {script}")
 
 
+def pick_provider() -> str | None:
+    if os.getenv("CF_ACCOUNT_ID") and os.getenv("CF_API_TOKEN"):
+        return "cloudflare"
+    if os.getenv("HF_TOKEN"):
+        return "huggingface"
+    return None
+
+
+def placeholders(ep: Path, leaders: list[dict], w: int, h: int) -> None:
+    """Plain gradient frames, so the sample still renders with no credentials."""
+    images = ep / "images"
+    images.mkdir(exist_ok=True)
+    shades = ["0x6b5744", "0x4a5a63", "0x7a6048", "0x3f4a52", "0x8a7152"]
+    for i, s in enumerate(leaders):
+        out = images / f"{s['image']}.png"
+        if out.exists():
+            continue
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi",
+             "-i", f"color=c={shades[i % len(shades)]}:size={w}x{h}:d=1",
+             "-frames:v", "1", str(out)],
+            capture_output=True, check=True,
+        )
+    log("sample", f"{len(leaders)} placeholder frames — no image credential "
+                  f"found, so the visuals are blank. Add CF_ACCOUNT_ID + "
+                  f"CF_API_TOKEN or a free HF_TOKEN to see real stills.")
+
+
 def main() -> None:
     c = cfg()
     suffix = " ".join(c["visual"]["style_suffix"].split())
+    group = max(1, int(c["visual"].get("scenes_per_image", 1)))
+    w, h = c["visual"]["width"], c["visual"]["height"]
 
     ep = episode_dir(SLUG)
     scenes = []
     for i, s in enumerate(SCENES, start=1):
+        leader = ((i - 1) // group) * group + 1
         scenes.append({
             "id": i,
             "slug": f"scene_{i:02d}",
             "narration": s["narration"],
             "visual": s["visual"],
             "sfx": "",
+            "image": f"scene_{leader:02d}",
+            "is_image_leader": i == leader,
             "image_prompt": f"{s['visual']}, {suffix}",
         })
     (ep / "scenes.json").write_text(
@@ -94,10 +129,17 @@ def main() -> None:
         "tags": ["sample"],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    log("sample", f"{len(scenes)} scenes — keyless providers only")
+    provider = pick_provider()
+    log("sample", f"{len(scenes)} scenes, "
+                  f"{sum(1 for s in scenes if s['is_image_leader'])} images, "
+                  f"image provider: {provider or 'none (placeholders)'}")
+
     call("gen_voice.py", "--slug", SLUG, "--provider", "edge")
-    call("gen_images.py", "--slug", SLUG, "--provider", "pollinations",
-         "--budget", 0)
+    if provider:
+        call("gen_images.py", "--slug", SLUG, "--provider", provider,
+             "--budget", 999)
+    else:
+        placeholders(ep, [s for s in scenes if s["is_image_leader"]], w, h)
     call("make_captions.py", "--slug", SLUG)
     call("make_thumbnail.py", "--slug", SLUG)
     call("assemble.py", "--slug", SLUG)
