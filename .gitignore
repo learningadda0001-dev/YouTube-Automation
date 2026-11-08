@@ -1,0 +1,20 @@
+# Generated media — far too big for git. The script, meta and scenes files
+# are committed so every published episode stays auditable.
+episodes/*/images/
+episodes/*/audio/
+episodes/*/_tmp/
+episodes/*/final.mp4
+episodes/*/captions.ass
+episodes/*/thumbnail.jpg
+assets/music/*.mp3
+assets/fonts/*.ttf
+
+# Secrets
+.env
+client_secret*.json
+token.json
+
+__pycache__/
+*.pyc
+.venv/
+run.log

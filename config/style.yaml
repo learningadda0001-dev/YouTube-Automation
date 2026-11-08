@@ -1,0 +1,54 @@
+# Visual, voice and caption style for every episode.
+# Changing anything here changes the whole channel's look — edit deliberately.
+
+channel:
+  language: kn            # narration language
+  target_minutes: 9.5
+  scenes: 50              # one generated image per scene
+  chars_per_second: 13.0  # Kannada narration rate, used to estimate runtime
+
+visual:
+  width: 1920
+  height: 1080
+  fps: 30
+  # Appended to every image prompt so all shots in all episodes grade alike.
+  style_suffix: >-
+    cinematic film still, 16:9, shot on 35mm anamorphic, shallow depth of field,
+    warm earthy desaturated palette, dust motes in volumetric light, soft golden
+    hour haze, historically accurate Indian setting, no text, no watermark,
+    photorealistic
+  negative: >-
+    modern clothing in historical scenes, cartoon, anime, illustration, text,
+    watermark, signature, deformed hands, extra fingers, blurry, low quality
+  # Camera motion applied in ffmpeg. A scene longer than split_after seconds is
+  # cut into two moves on the same image, so the picture changes every few
+  # seconds even though one image covers the whole scene.
+  motion:
+    zoom_per_second: 0.012
+    split_after: 9.0
+    moves: [push_in, pull_out, pan_left, pan_right]
+
+voice:
+  provider: edge          # edge (free) | elevenlabs | google
+  edge_voice: kn-IN-GaganNeural
+  edge_rate: "-8%"
+  edge_pitch: "-2Hz"
+  elevenlabs_model: eleven_multilingual_v2
+  google_voice: kn-IN-Chirp3-HD-Achernar
+
+captions:
+  font: Noto Sans Kannada
+  size: 54
+  max_chars: 42
+  max_lines: 2
+  margin_v: 96
+
+audio:
+  music_db: -22.0
+  target_lufs: -14.0
+  scene_pad: 0.35         # silence after each line, seconds
+
+upload:
+  category_id: "27"       # Education
+  privacy: private        # flip to "public" once you trust the output
+  made_for_kids: false

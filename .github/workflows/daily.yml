@@ -1,0 +1,104 @@
+name: Daily episode
+
+on:
+  schedule:
+    # 13:30 UTC = 19:00 IST. Cloudflare's free neuron budget resets at 00:00
+    # UTC, so by this hour a full day's allowance is available.
+    - cron: "30 13 * * *"
+  workflow_dispatch:
+    inputs:
+      topic_id:
+        description: "Force a specific topic id (blank = next pending)"
+        required: false
+      privacy:
+        description: "private | unlisted | public"
+        required: false
+        default: "private"
+      stop_before:
+        description: "Stop before this stage (e.g. upload)"
+        required: false
+      keep_video:
+        description: "Upload final.mp4 as a workflow artifact"
+        type: boolean
+        default: false
+
+concurrency:
+  group: daily-episode
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  episode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ffmpeg and Kannada fonts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-core fonts-noto-unhinted
+          # Fail here rather than silently shipping a video of empty boxes.
+          fc-list | grep -qi kannada || { echo "No Kannada font installed"; exit 1; }
+          fc-list | grep -i kannada | head -3
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build and upload the episode
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
+        run: |
+          ARGS=""
+          [ -n "${{ inputs.topic_id }}" ] && ARGS="$ARGS --id ${{ inputs.topic_id }}"
+          [ -n "${{ inputs.privacy }}" ] && ARGS="$ARGS --privacy ${{ inputs.privacy }}"
+          [ -n "${{ inputs.stop_before }}" ] && ARGS="$ARGS --stop-before ${{ inputs.stop_before }}"
+          python src/run_daily.py $ARGS | tee run.log
+          grep '^SLUG=' run.log | tail -1 >> "$GITHUB_ENV"
+
+      - name: Keep the script and thumbnail for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: episode-${{ env.SLUG }}-review
+          path: |
+            episodes/*/script.md
+            episodes/*/meta.json
+            episodes/*/thumbnail.jpg
+            run.log
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Keep the finished video
+        if: ${{ always() && inputs.keep_video }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: episode-${{ env.SLUG }}-video
+          path: episodes/*/final.mp4
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Record what was published
+        if: success()
+        run: |
+          git config user.name  "youtube-automation"
+          git config user.email "actions@github.com"
+          git add config/topics.csv episodes/*/script.md episodes/*/meta.json || true
+          git diff --cached --quiet || git commit -m "episode ${SLUG}: published"
+          git push || echo "nothing to push"
