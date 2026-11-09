@@ -34,11 +34,16 @@ visual:
     zoom_per_second: 0.012
     split_after: 9.0
     moves: [push_in, pull_out, pan_left, pan_right]
-  # Consecutive scenes share one image, each getting a different camera move,
-  # so the framing still changes every scene. This is what keeps a 100-scene
-  # episode inside Cloudflare's ~57 free images a day. Set to 1 if you add a
-  # second image provider and want a fresh frame per scene.
-  scenes_per_image: 2
+  # One image per scene. Pairing scenes to save images was tried and dropped:
+  # the second scene's narration then plays over the first scene's picture,
+  # and on the 9 Nov sample that put a line about a carved stone at Begur
+  # over a field of cattle. Pollinations is rate limited rather than capped,
+  # so a fresh image per scene costs only time.
+  scenes_per_image: 1
+  # Trim the outer edge before the camera move. Generated images sometimes
+  # carry a provider watermark in a corner (Pollinations does, even with
+  # nologo=true); this crops it off rather than publishing it.
+  edge_trim: 0.07
   # Film grain sells the "shot on film" look, but random noise is the worst
   # case for video compression: at strength 5 a 47s test came out at 64MB,
   # which extrapolates to ~1.6GB for a 20-minute episode. 2 keeps the

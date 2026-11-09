@@ -23,7 +23,8 @@ from common import EPISODES, cfg, load_scenes, log, probe_duration, run
 PRESCALE = 2560
 
 
-def move_filter(kind: str, frames: int, zps: float, w: int, h: int, fps: int) -> str:
+def move_filter(kind: str, frames: int, zps: float, w: int, h: int, fps: int,
+                trim: float = 0.0) -> str:
     end_zoom = 1.0 + zps * frames / fps
     if kind == "push_in":
         z = f"1.0+{zps / fps:.6f}*on"
@@ -38,11 +39,23 @@ def move_filter(kind: str, frames: int, zps: float, w: int, h: int, fps: int) ->
         z = "1.14"
         x, y = f"(iw-iw/zoom)*(1-on/{frames})", "ih/2-(ih/zoom/2)"
 
-    # Scale-and-crop to cover 16:9 first, so a square image from a provider
-    # that ignores width/height still fills the frame instead of pillarboxing.
+    # Blur out the bottom-right corner before anything else. Generated images
+    # sometimes carry a provider watermark there — Pollinations does, even
+    # with nologo=true. Cropping it away would cost over 10% of every frame;
+    # blurring a small patch costs nothing visible once the shot is moving.
+    # Anchored top-left, so only the right and bottom edges are lost — the
+    # two the mark sits on. Blurring the corner instead was tried and left a
+    # visible rectangle edge; cropping leaves nothing behind. Aspect ratio is
+    # unchanged, so nothing downstream has to care.
+    keep = max(0.80, 1.0 - trim)
+    edge = f"crop=iw*{keep:.4f}:ih*{keep:.4f}:0:0," if trim > 0 else ""
+
+    # Scale-and-crop to cover 16:9, so a square image from a provider that
+    # ignores width/height still fills the frame instead of pillarboxing.
     # Grain and vignette are deliberately NOT here — they go in the single
     # final encode, so each scene costs one cheap pass instead of two dear ones.
     return (
+        f"{edge}"
         f"scale={PRESCALE}:{PRESCALE * h // w}:force_original_aspect_ratio=increase,"
         f"crop={PRESCALE}:{PRESCALE * h // w},setsar=1,"
         f"zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s={w}x{h}:fps={fps},"
@@ -95,7 +108,8 @@ def main():
             run([
                 "ffmpeg", "-y", "-loop", "1", "-framerate", fps, "-i", str(img),
                 "-t", f"{part_dur:.3f}",
-                "-vf", move_filter(kind, frames, zps, w, h, fps),
+                "-vf", move_filter(kind, frames, zps, w, h, fps,
+                                   float(vis.get("edge_trim", 0.0))),
                 # Visually lossless throwaway intermediate — the final pass
                 # does the real compression, so spend no time here.
                 "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "14",
