@@ -1,0 +1,22 @@
+name: Probe image sources
+
+# Diagnostic only. Asks a runner which keyless image sources actually respond,
+# since the development sandbox cannot reach any of them.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - run: python src/probe_providers.py
