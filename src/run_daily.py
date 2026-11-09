@@ -19,7 +19,7 @@ from pathlib import Path
 from common import EPISODES, log
 
 SRC = Path(__file__).resolve().parent
-STAGES = ["script", "parse", "voice", "images", "captions",
+STAGES = ["script", "parse", "voice", "images", "depth", "captions",
           "thumbnail", "assemble", "upload"]
 
 
@@ -75,6 +75,8 @@ def main():
     if active("images"):
         # After parse, so meta.json exists and the thumbnail frame can be made.
         call("gen_images.py", "--slug", slug)
+    if active("depth"):
+        call("gen_depth.py", "--slug", slug)
     if active("captions"):
         call("make_captions.py", "--slug", slug)
     if active("thumbnail"):

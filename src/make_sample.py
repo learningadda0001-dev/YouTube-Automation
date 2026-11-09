@@ -144,6 +144,7 @@ def main() -> None:
         # placeholder frames still shows the voice, captions and pacing.
         log("sample", f"{provider} could not deliver; using placeholders")
         placeholders(ep, leaders, w, h)
+    call("gen_depth.py", "--slug", SLUG)
     call("make_captions.py", "--slug", SLUG)
     call("make_thumbnail.py", "--slug", SLUG)
     call("assemble.py", "--slug", SLUG, "--preview")

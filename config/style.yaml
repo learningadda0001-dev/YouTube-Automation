@@ -30,6 +30,13 @@ visual:
   # Camera motion applied in ffmpeg. A scene longer than split_after seconds is
   # cut into two moves on the same image, so the picture changes every few
   # seconds even though one image covers the whole scene.
+  # 2.5D parallax: the image is split by its depth map into a near and a far
+  # layer that travel at different rates, so the camera moves THROUGH the
+  # scene instead of across a flat picture. This is the main thing separating
+  # a moving photograph from a slideshow. Needs depth maps from gen_depth.py;
+  # without them assemble.py silently falls back to the flat move.
+  parallax: true
+  near_gain: 1.0          # raise for a stronger effect, lower if edges show
   motion:
     zoom_per_second: 0.012
     split_after: 9.0
@@ -77,6 +84,10 @@ captions:
   margin_v: 96
 
 audio:
+  # With no assets/music/bed.mp3, a low ambient drone is synthesised so the
+  # episode is not bare voice over silence. Drop a real track in to replace
+  # it — anything there wins.
+  synth_bed: true
   music_db: -22.0
   target_lufs: -14.0
   scene_pad: 0.35         # silence after each line, seconds

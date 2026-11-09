@@ -63,6 +63,74 @@ def move_filter(kind: str, frames: int, zps: float, w: int, h: int, fps: int,
     )
 
 
+def parallax_graph(kind: str, dur: float, w: int, h: int, trim: float,
+                   near_gain: float) -> str:
+    """A 2.5D camera move: foreground and background travel at different rates.
+
+    This is what separates a moving photograph from a slideshow. The image is
+    split into a near layer (masked by its depth map) and a far layer (the
+    whole picture). Both crop-zoom and pan over the shot, the near one further
+    and faster, so the frame gains real depth. Where the near layer moves
+    away, the far layer shows through — with modest displacement the seam is
+    not noticeable, and no inpainting is needed.
+
+    Expressed entirely in crop expressions rather than zoompan, because
+    zoompan does not carry an alpha channel and the near layer needs one.
+    """
+    keep = max(0.80, 1.0 - trim)
+    bw, bh = int(w * 1.30), int(h * 1.30)
+
+    frames = max(int(round(dur * 30)), 2)
+
+    def layer(z0: float, z1: float, pan_x: float) -> str:
+        """zoompan from z0 to z1 while drifting pan_x pixels across the shot.
+
+        crop cannot do this: it evaluates w and h once at configure time, so
+        only x and y animate. zoompan animates the zoom but discards alpha —
+        hence running it on the picture and on the mask separately with
+        identical parameters, and merging the alpha afterwards.
+        """
+        z = f"{z0:.4f}+({z1 - z0:.4f})*on/{frames}"
+        x = f"iw/2-(iw/zoom/2)+({pan_x:.1f})*on/{frames}"
+        y = "ih/2-(ih/zoom/2)"
+        return (f"zoompan=z='{z}':x='{x}':y='{y}':"
+                f"d={frames}:s={w}x{h}:fps=30")
+
+    g = near_gain
+    # The near layer always moves further than the far one — that difference
+    # is the entire effect. Direction varies per shot so consecutive scenes
+    # do not feel identical.
+    if kind == "push_in":
+        far, near = layer(1.00, 1.05, 0), layer(1.00, 1.14 * g, 0)
+    elif kind == "pull_out":
+        far, near = layer(1.05, 1.00, 0), layer(1.14 * g, 1.00, 0)
+    elif kind == "pan_right":
+        far, near = layer(1.02, 1.04, 14), layer(1.05, 1.09, 46 * g)
+    else:  # pan_left
+        far, near = layer(1.02, 1.04, -14), layer(1.05, 1.09, -46 * g)
+
+    prep = (f"crop=iw*{keep:.4f}:ih*{keep:.4f}:0:0,"
+            f"scale={bw}:{bh}:force_original_aspect_ratio=increase,"
+            f"crop={bw}:{bh},setsar=1")
+
+    graph = (
+        f"[0:v]{prep}[big];"
+        f"[1:v]crop=iw*{keep:.4f}:ih*{keep:.4f}:0:0,"
+        f"scale={bw}:{bh}:force_original_aspect_ratio=increase,"
+        f"crop={bw}:{bh},setsar=1[maskbig];"
+        f"[big]split[farsrc][nearsrc];"
+        f"[farsrc]{far}[far];"
+        # The mask rides the SAME move as the near picture, so the cut-out
+        # stays locked to the object it was cut from.
+        f"[nearsrc]{near}[nearpix];"
+        f"[maskbig]{near},format=gray[nearmask];"
+        f"[nearpix]format=rgba[nearrgba];"
+        f"[nearrgba][nearmask]alphamerge[near];"
+        f"[far][near]overlay=0:0:format=auto,format=yuv420p[v]"
+    )
+    return graph
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--slug", required=True)
@@ -100,16 +168,34 @@ def main():
         parts = 2 if dur > split_after else 1
         part_dur = dur / parts
 
+        depth = ep / "depth" / f"{s.get('image', s['slug'])}.png"
+        use_parallax = depth.exists() and vis.get("parallax", True)
+
         piece_paths = []
         for p in range(parts):
             kind = moves[(i * 2 + p) % len(moves)]
             frames = max(int(round(part_dur * fps)), 2)
             out = tmp / f"{s['slug']}_{p}.mp4"
-            run([
-                "ffmpeg", "-y", "-loop", "1", "-framerate", fps, "-i", str(img),
-                "-t", f"{part_dur:.3f}",
-                "-vf", move_filter(kind, frames, zps, w, h, fps,
-                                   float(vis.get("edge_trim", 0.0))),
+            trim = float(vis.get("edge_trim", 0.0))
+
+            if use_parallax:
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-loop", "1", "-framerate", fps, "-i", str(img),
+                    "-loop", "1", "-framerate", fps, "-i", str(depth),
+                    "-t", f"{part_dur:.3f}",
+                    "-filter_complex",
+                    parallax_graph(kind, part_dur, w, h, trim,
+                                   float(vis.get("near_gain", 1.0))),
+                    "-map", "[v]",
+                ]
+            else:
+                cmd = [
+                    "ffmpeg", "-y", "-loop", "1", "-framerate", fps,
+                    "-i", str(img), "-t", f"{part_dur:.3f}",
+                    "-vf", move_filter(kind, frames, zps, w, h, fps, trim),
+                ]
+            run(cmd + [
                 # Visually lossless throwaway intermediate — the final pass
                 # does the real compression, so spend no time here.
                 "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "14",
@@ -157,6 +243,32 @@ def main():
     crf = str(vis.get("crf", 21))
     final = ep / "final.mp4"
     bed = next((p for p in sorted((ep.parent.parent / "assets" / "music").glob("*.mp3"))), None)
+
+    if bed is None and aud.get("synth_bed"):
+        # Bare voice over silence is a large part of why a stills episode
+        # feels cheap. A sustained low drone with a slow swell sits under the
+        # narration and reads as atmosphere rather than as music. Royalty
+        # free by construction — it is generated, not sampled.
+        bed = tmp.parent / "_bed.mp3"
+        run([
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", "sine=frequency=55:duration=120",
+            "-f", "lavfi", "-i", "sine=frequency=82.5:duration=120",
+            "-f", "lavfi", "-i", "sine=frequency=110:duration=120",
+            "-f", "lavfi", "-i", "anoisesrc=d=120:c=brown:a=0.06",
+            "-filter_complex",
+            "[0:a]volume=0.5[a0];[1:a]volume=0.26[a1];[2:a]volume=0.15[a2];"
+            "[3:a]lowpass=f=320,volume=0.5[a3];"
+            "[a0][a1][a2][a3]amix=inputs=4:normalize=0,"
+            "lowpass=f=900,"
+            # Slow breathing swell, ~25s cycle, so it never sits still.
+            # apulsator rather than tremolo: tremolo refuses below 0.1 Hz.
+            "apulsator=hz=0.04:amount=0.35,"
+            "aecho=0.8:0.9:180|420:0.35|0.22,"
+            "volume=0.8",
+            "-c:a", "libmp3lame", "-b:a", "160k", str(bed),
+        ])
+        log("assemble", "synthesised an ambient bed (no assets/music/*.mp3)")
 
     base = ["ffmpeg", "-y", "-i", str(joined)]
     if bed:
