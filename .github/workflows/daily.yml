@@ -1,10 +1,10 @@
 name: Daily episode
 
+# The daily schedule was removed on request — this workflow now runs only
+# when started by hand. To bring it back, restore:
+#   schedule:
+#     - cron: "30 13 * * *"      # 13:30 UTC = 19:00 IST
 on:
-  schedule:
-    # 13:30 UTC = 19:00 IST. Cloudflare's free neuron budget resets at 00:00
-    # UTC, so by this hour a full day's allowance is available.
-    - cron: "30 13 * * *"
   workflow_dispatch:
     inputs:
       topic_id:
