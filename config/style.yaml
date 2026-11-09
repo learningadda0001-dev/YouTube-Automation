@@ -45,13 +45,16 @@ visual:
   # texture at a fraction of the bitrate. 0 disables it.
   grain: 2
   crf: 21
-  # Pollinations started returning 402 Payment Required on 8 Nov 2026, so it
-  # is no longer a free fallback. huggingface needs a free HF_TOKEN; without
-  # one, keep scenes_per_image at 2 and everything fits in Cloudflare alone.
+  # Pollinations needs no key at all, which is why it leads. Its 402s are
+  # rate limiting, not a paywall: a 9 Nov 2026 probe showed model=flux
+  # returning 200 while back-to-back calls get 402, hence request_delay.
+  # Set primary to cloudflare once CF_ACCOUNT_ID and CF_API_TOKEN exist —
+  # it is faster and has no limiter at this volume, just a 57/day ceiling.
   providers:
-    primary: cloudflare
-    primary_budget: 55
+    primary: pollinations
+    primary_budget: 999
     secondary: none
+    request_delay: 8
 
 voice:
   provider: edge          # edge (free) | elevenlabs | google

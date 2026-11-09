@@ -63,14 +63,25 @@ def huggingface(prompt: str, out: Path, width: int, height: int) -> None:
 
 
 def pollinations(prompt: str, out: Path, width: int, height: int) -> None:
-    """Keyless, but started returning 402 Payment Required on 8 Nov 2026.
-    Kept because it may come back; do not rely on it."""
+    """Keyless. Rate limited, not paywalled.
+
+    A probe on 9 Nov 2026 showed `model=flux` returning 200 while the bare and
+    `model=turbo` endpoints return 402, and that firing requests back to back
+    gets 402 as well. So: always name the model, and leave a gap between
+    calls (see REQUEST_DELAY). A 402 here is retryable, not fatal.
+    """
     from urllib.parse import quote
 
     url = (f"https://image.pollinations.ai/prompt/{quote(prompt[:1500])}"
            f"?width={width}&height={height}&nologo=true&model=flux")
-    r = requests.get(url, timeout=240)
+    r = requests.get(url, timeout=300)
+    if r.status_code in (402, 429, 500, 502, 503, 504):
+        raise RuntimeError(f"rate limited (HTTP {r.status_code})")
     r.raise_for_status()
+    if len(r.content) < 15_000 or not r.headers.get(
+            "content-type", "").startswith("image/"):
+        raise RuntimeError(f"not an image ({len(r.content)} bytes, "
+                           f"{r.headers.get('content-type')})")
     out.write_bytes(r.content)
 
 
@@ -88,7 +99,11 @@ def generate(prompt: str, out: Path, w: int, h: int, provider: str,
             return provider
         except Exception as exc:                          # noqa: BLE001
             last_error = exc
-            time.sleep(2 ** attempt * 3)
+            # Generous backoff: the keyless provider's limit is per-minute,
+            # so a short retry just burns another rejection.
+            wait = min(15 * (attempt + 1) ** 2, 180)
+            log("images", f"{out.stem}: {exc} — retrying in {wait}s")
+            time.sleep(wait)
 
     if secondary == "none" or secondary == provider:
         raise SystemExit(f"{out.stem} failed: {last_error}")
@@ -105,7 +120,9 @@ def main():
                     help="override the primary from style.yaml")
     ap.add_argument("--budget", type=int,
                     help="override how many images the primary provider makes")
-    ap.add_argument("--retries", type=int, default=3)
+    ap.add_argument("--retries", type=int, default=4)
+    ap.add_argument("--delay", type=float,
+                    help="seconds between requests; overrides style.yaml")
     args = ap.parse_args()
 
     c = cfg()
@@ -115,6 +132,8 @@ def main():
     secondary = prov.get("secondary", "pollinations")
     budget = args.budget if args.budget is not None else prov.get(
         "primary_budget", 50)
+    delay = args.delay if args.delay is not None else prov.get(
+        "request_delay", 0)
 
     ep = EPISODES / args.slug
     images = ep / "images"
@@ -154,8 +173,12 @@ def main():
             spent += 1
 
         done = sum(counts.values())
-        if done % 20 == 0:
-            log("images", f"{done} generated ...")
+        if done % 10 == 0:
+            log("images", f"{done}/{len(leaders)} generated ...")
+        # Space the requests out. Firing back to back is what triggers the
+        # keyless provider's limiter.
+        if delay and done < len(leaders):
+            time.sleep(delay)
 
     # The thumbnail gets its own frame when the outline described one.
     meta_path = ep / "meta.json"

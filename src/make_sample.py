@@ -70,12 +70,13 @@ def call(script: str, *args) -> None:
         raise SystemExit(f"stage failed: {script}")
 
 
-def pick_provider() -> str | None:
+def pick_provider() -> str:
+    """Prefer a keyed provider if one is configured, else the keyless one."""
     if os.getenv("CF_ACCOUNT_ID") and os.getenv("CF_API_TOKEN"):
         return "cloudflare"
     if os.getenv("HF_TOKEN"):
         return "huggingface"
-    return None
+    return "pollinations"
 
 
 def placeholders(ep: Path, leaders: list[dict], w: int, h: int) -> None:
@@ -130,16 +131,19 @@ def main() -> None:
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     provider = pick_provider()
-    log("sample", f"{len(scenes)} scenes, "
-                  f"{sum(1 for s in scenes if s['is_image_leader'])} images, "
-                  f"image provider: {provider or 'none (placeholders)'}")
+    leaders = [s for s in scenes if s["is_image_leader"]]
+    log("sample", f"{len(scenes)} scenes, {len(leaders)} images, "
+                  f"image provider: {provider}")
 
     call("gen_voice.py", "--slug", SLUG, "--provider", "edge")
-    if provider:
+    try:
         call("gen_images.py", "--slug", SLUG, "--provider", provider,
              "--budget", 999)
-    else:
-        placeholders(ep, [s for s in scenes if s["is_image_leader"]], w, h)
+    except SystemExit:
+        # Never let the sample fail outright over images — a render with
+        # placeholder frames still shows the voice, captions and pacing.
+        log("sample", f"{provider} could not deliver; using placeholders")
+        placeholders(ep, leaders, w, h)
     call("make_captions.py", "--slug", SLUG)
     call("make_thumbnail.py", "--slug", SLUG)
     call("assemble.py", "--slug", SLUG, "--preview")
